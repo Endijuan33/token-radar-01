@@ -145,6 +145,7 @@ tbody tr[data-selected="true"] { background: color-mix(in srgb, var(--accent) 8%
 .steps b { display: block; font-weight: 500; }
 .cost { color: var(--muted); font-size: 12px; font-family: var(--font-num); }
 .researched { display: inline-block; margin-top: var(--step-2); font-size: 12px; color: var(--accent); border: 1px solid var(--border); border-radius: 20px; padding: 2px 10px; }
+.note { margin-top: var(--step-3); padding: var(--step-3) var(--step-4); background: #fdf6e3; border: 1px solid #e8d9a8; border-radius: var(--radius-control); color: var(--ink); }
 
 @media (max-width: 900px) {
   .shell { padding: var(--step-4); }

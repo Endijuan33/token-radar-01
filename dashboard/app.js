@@ -1,7 +1,4 @@
-// Token Radar's plain dashboard, radar-2. It reads window.RADAR (written beside dashboard/ by
-// main.ts) and window.RESEARCH (the watchlist's researched farm plans) and renders the ranked board,
-// a filterable table, and a per-protocol detail drawer with the model's own inputs and the protocol's
-// farm plan. No network: every byte it shows is in data.js and research.js.
+// Token Radar's dashboard, radar-2: renders the ranked board, filters, and per-protocol detail.
 (function () {
   'use strict';
 
@@ -29,8 +26,8 @@
     return Math.max(0, Math.round(days)) + 'd';
   }
   function fmtLik(n) { return Math.round(n * 100) + '%'; }
-  // The model in one function: the page recomputes a row from the snapshot figures and checks the
-  // number board.json carries, so the page's code and the board's data are visibly the same arithmetic.
+  // The model in one function: the page recomputes a row and checks it against board.json,
+  // so the page's code and the board's data are visibly the same arithmetic.
   function impliedOf(row, model) {
     var comp = row.comp_multiple;
     var growth = Math.min(model.growth_cap, Math.max(model.growth_floor, row.change_7d === null || row.change_7d === undefined ? 0 : row.change_7d));
@@ -61,9 +58,7 @@
     return node;
   }
 
-  // The farm plan: the researched plan when research.js holds one for this slug, else the same
-  // category derivation main.ts writes to board.json: category, chains, TVL and age decide the action,
-  // the capital, the hold and every cost and time. No name is special-cased in the score.
+  // The farm plan: the researched plan when research.js holds one, else the category derivation.
   function chainOf(p) { return p.chains && p.chains.length > 0 ? p.chains[0] : 'its main chain'; }
   function capitalFor(p) {
     if (p.tvl_usd >= 5e9) return 250;
@@ -104,22 +99,30 @@
     var capital = capitalFor(p);
     var hold = holdDaysFor(p.age_days);
     return [
-      { text: 'Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline.', cost: 'under $3 of gas for the first transaction', time: '5 minutes' },
+      { text: 'Use a fresh wallet holding only the funds you plan to farm, and keep its seed phrase offline.', cost: 'under $3 of gas for the first transaction', time: '5 minutes' },
       { text: actionFor(p, capital, chain), cost: '$' + capital + ' of capital and about $' + (capital >= 150 ? 8 : 4) + ' of gas', time: '15 minutes to set up' },
-      { text: 'Make one qualifying action each week, such as a deposit, a borrow, a swap or a vote.', cost: 'about $2 of gas a week', time: '10 minutes a week' },
+      { text: 'Make one qualifying action each week: a deposit, a borrow, a swap or a vote.', cost: 'about $2 of gas a week', time: '10 minutes a week' },
       { text: 'Hold the position for at least ' + hold + ' days so the activity is counted in more than one snapshot.', cost: 'the $' + capital + ' stays in the position', time: hold + ' days' },
-      { text: "Before you withdraw, open the protocol's own points or rewards page and claim only from the link it publishes.", cost: 'no fee to check, and never pay to claim', time: '10 minutes' },
-      { text: 'Write the wallet, the dates and every transaction in a farm log so you can repeat the position or unwind it.', cost: 'nothing but the log', time: '5 minutes' }
+      { text: "Before you withdraw, open the protocol's own rewards page and claim only from the link it publishes.", cost: 'no fee to check, and never pay to claim', time: '10 minutes' },
+      { text: 'Log the wallet, the dates and every transaction so you can repeat the position or unwind it.', cost: 'nothing but the log', time: '5 minutes' }
     ].map(stepText);
   }
 
-  // Why this row ranks where it does, in one sentence from the model's own inputs.
+  // Why this row ranks where it does, from the model's own inputs.
   function whyLine(r) {
     var cat = r.category || 'Other';
     var lik = fmtLik(r.launch_likelihood);
     if (r.launch_likelihood < 0.3) return 'Ranked low on purpose: ' + cat + ' protocols almost never issue a token of their own, so the launch likelihood is only ' + lik + ' even at ' + fmtUsd(r.tvl_usd) + ' of TVL.';
     if (r.launch_likelihood >= 0.85) return 'Ranked here on size plus intent: ' + fmtUsd(r.tvl_usd) + ' of TVL in ' + cat + ', a category whose launched tokens trade near ' + r.comp_multiple.toFixed(2) + 'x TVL, with a ' + lik + ' launch likelihood.';
     return 'Ranked here on size and momentum: ' + fmtUsd(r.tvl_usd) + ' of TVL, ' + fmtPct(r.change_7d) + ' over seven days, ' + cat + ' at ' + r.comp_multiple.toFixed(2) + 'x TVL, launch likelihood ' + lik + '.';
+  }
+
+  // Market cap against the model's implied value, for a live-token row.
+  function calibrationLine(r) {
+    if (r.mcap_usd === null || r.mcap_usd === undefined || !r.implied_value_usd) return 'No market cap to compare against.';
+    var ratio = r.mcap_usd / r.implied_value_usd;
+    if (ratio >= 1) return 'The market pays ' + fmtUsd(r.mcap_usd) + ' — ' + ratio.toFixed(1) + 'x the model\'s ' + fmtUsd(r.implied_value_usd) + ' implied value: the market prices something the snapshot figures do not carry.';
+    return 'The market pays ' + fmtUsd(r.mcap_usd) + ' — ' + ratio.toFixed(2) + 'x the model\'s ' + fmtUsd(r.implied_value_usd) + ' implied value: the market prices this protocol below what its TVL and growth imply.';
   }
 
   function readHash() {
@@ -317,20 +320,25 @@
   function liveTable() {
     var tbody = el('tbody');
     DATA.live.forEach(function (r) {
-      tbody.appendChild(el('tr', null,
+      tbody.appendChild(el('tr', {
+        tabindex: '0',
+        onclick: function () { openDetail(r.slug); },
+        onkeydown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(r.slug); } }
+      },
         el('td', { class: 'num', text: 'live' }),
         el('td', null, el('div', { class: 'name' }, el('b', { text: r.name }), el('span', { class: 'sub', text: (r.category || 'Other') + ' on ' + (r.chains && r.chains.length ? r.chains.slice(0, 2).join(', ') : 'an unnamed chain') }))),
         el('td', { class: 'num', text: fmtUsd(r.tvl_usd) }),
         el('td', { class: 'num ' + (r.change_7d !== null && r.change_7d >= 0 ? 'pos' : 'neg'), text: fmtPct(r.change_7d) }),
         el('td', { class: 'num', text: fmtUsd(r.mcap_usd) }),
+        el('td', { class: 'num', text: fmtUsd(r.implied_value_usd) }),
         el('td', null, el('span', { class: 'status', text: 'already trades' }))
       ));
     });
     return el('div', { class: 'panel' },
       el('div', { class: 'table-wrap' },
         el('table', null,
-          el('caption', { class: 'sub', text: 'Token live: these protocols already trade, so their market cap is a fact, not a model. They are set aside from the pre-token ranking.' }),
-          el('thead', null, el('tr', null, el('th', { scope: 'col', text: 'Status' }), el('th', { scope: 'col', text: 'Protocol' }), el('th', { scope: 'col', text: 'TVL' }), el('th', { scope: 'col', text: '7d' }), el('th', { scope: 'col', text: 'Market cap' }), el('th', { scope: 'col', text: 'Token' }))),
+          el('caption', { class: 'sub', text: 'Token live, strongest market cap first: their market cap is a fact, not a model. The model-implied column shows what the same function would have scored them — the model\'s calibration against the market. Select a row for its model panel.' }),
+          el('thead', null, el('tr', null, el('th', { scope: 'col', text: 'Status' }), el('th', { scope: 'col', text: 'Protocol' }), el('th', { scope: 'col', text: 'TVL' }), el('th', { scope: 'col', text: '7d' }), el('th', { scope: 'col', text: 'Market cap' }), el('th', { scope: 'col', text: 'Model implied' }), el('th', { scope: 'col', text: 'Token' }))),
           tbody
         )
       )
@@ -368,9 +376,9 @@
     return el('section', { class: 'panel notes' },
       el('h2', { text: 'What the snapshot does not say' }),
       el('ul', null,
-        el('li', { text: '"No token on record" is a snapshot fact, not a promise. Doppler Finance records no token, but its XDP token launched on 28 Sep 2026 (10B supply, near $0.019): the snapshot is stale on this row, and its farm value is future points seasons only.' }),
+        el('li', { text: 'Already launched, ranked as yield plays: Doppler (XDP, Sep 2026), PLUME, MEZO, TAO and wTAO, XRP, XPL, MANTA, APEX, COOK, ZRC, B2, FIST and STRK — plus FIUSD, a permissioned fund share retail cannot buy. Each row says so in its detail view.' }),
         el('li', { text: 'USDD is itself a stablecoin: the row scores what a governance token for its issuer could be worth, not a token that does not exist. Lightning Network is a payments network and Noble and Hive are chains: they score low because their kind almost never issues a protocol token.' }),
-        el('li', { text: 'Points programs change. A farm plan names the program the research found on 15 Nov 2026; before depositing, open the protocol\'s own page and check it is still live. Never pay to claim, and never trust a link that is not the protocol\'s own.' })
+        el('li', { text: 'Points programs change. A farm plan names the program the research found on 15 Nov 2026; before depositing, check it is still live on the protocol\'s own page. Never pay to claim, and never trust a link that is not the protocol\'s own.' })
       )
     );
   }
@@ -379,16 +387,18 @@
   dialog.addEventListener('close', function () { state.selected = null; writeHash(); });
 
   function openDetail(slug) {
-    var row = DATA.rows.filter(function (r) { return r.slug === slug; })[0];
+    var row = DATA.rows.filter(function (r) { return r.slug === slug; })[0]
+      || DATA.live.filter(function (r) { return r.slug === slug; })[0];
     if (!row) return;
+    var isLive = row.rank === undefined;
     state.selected = slug;
     writeHash();
     dialog.textContent = '';
-    var steps = farmSteps(row);
+    var steps = isLive ? [] : farmSteps(row);
     var researched = !!RESEARCH[row.slug];
     dialog.appendChild(el('div', { class: 'detail-head' },
       el('div', null,
-        el('span', { class: 'brand-name', text: 'Rank ' + row.rank + ' of ' + DATA.board_size }),
+        el('span', { class: 'brand-name', text: isLive ? 'Live token — set aside from the ranking' : 'Rank ' + row.rank + ' of ' + DATA.board_size }),
         el('h2', { id: 'detail-title', text: row.name }),
         el('p', { class: 'sub', text: (row.category || 'Other') + ' on ' + (row.chains && row.chains.length ? row.chains.join(', ') : 'an unnamed chain') }),
         researched ? el('span', { class: 'researched', text: 'Researched farm plan' }) : null
@@ -396,7 +406,7 @@
       el('button', { class: 'close', type: 'button', 'aria-label': 'Close details', text: 'Close', onclick: function () { dialog.close(); } })
     ));
     dialog.appendChild(el('section', { class: 'detail-section' },
-      el('h3', { text: 'Implied value' }),
+      el('h3', { text: isLive ? 'Model against the market' : 'Implied value' }),
       el('div', { class: 'equation' },
         el('div', null, el('span', { text: 'TVL' }), el('b', { class: 'num', text: fmtUsd(row.tvl_usd) })),
         el('div', null, el('span', { text: 'FDV/TVL comp (' + (row.category || 'Other') + ')' }), el('b', { class: 'num', text: row.comp_multiple.toFixed(2) + 'x' })),
@@ -405,20 +415,29 @@
         el('div', null, el('span', { text: 'Growth multiplier' }), el('b', { class: 'num', text: String(row.growth_multiplier) })),
         el('div', null, el('span', { text: 'Maturity multiplier' }), el('b', { class: 'num', text: String(row.maturity_multiplier) })),
         el('div', null, el('span', { text: 'Launch likelihood' }), el('b', { class: 'num', text: fmtLik(row.launch_likelihood) })),
-        el('div', null, el('span', { text: 'Implied value' }), el('b', { class: 'num', text: fmtUsd(row.implied_value_usd) }))
+        el('div', null, el('span', { text: 'Implied value' }), el('b', { class: 'num', text: fmtUsd(row.implied_value_usd) })),
+        isLive ? el('div', null, el('span', { text: 'Market cap (actual)' }), el('b', { class: 'num', text: fmtUsd(row.mcap_usd) })) : null
       ),
-      el('p', { text: whyLine(row) }),
-      el('p', { class: 'sub', text: 'Model ' + DATA.model_version + ': the same function scores every protocol. The page recomputes this row as ' + fmtUsd(impliedOf(row, DATA.model)) + (Math.abs(impliedOf(row, DATA.model) - row.implied_value_usd) <= Math.max(1, row.implied_value_usd * 0.001) ? ', the same number board.json carries (the stored factors are rounded to four decimals, so the recompute agrees to within 0.1%).' : ', which differs from the board: the data would be stale.') + ' This is an estimate, not a price.' })
+      el('p', { text: isLive ? calibrationLine(row) : whyLine(row) }),
+      row.note ? el('p', { class: 'note', text: row.note }) : null,
+      el('p', { class: 'sub', text: isLive ? 'Model ' + DATA.model_version + ': the same function scores every protocol, live or pre-token. An estimate, not a price; the market cap is the fact.' : 'Model ' + DATA.model_version + ': the same function scores every protocol. The page recomputes this row as ' + fmtUsd(impliedOf(row, DATA.model)) + (Math.abs(impliedOf(row, DATA.model) - row.implied_value_usd) <= Math.max(1, row.implied_value_usd * 0.001) ? ', the same number board.json carries (stored factors are rounded to four decimals, so it agrees to within 0.1%).' : ', which differs from the board: the data would be stale.') + ' This is an estimate, not a price.' })
     ));
-    dialog.appendChild(el('section', { class: 'detail-section' },
-      el('h3', { text: 'Farm plan' }),
-      el('ol', { class: 'steps' }, steps.map(function (s) {
-        var at = s.indexOf(' Cost: ');
-        var action = at >= 0 ? s.slice(0, at) : s;
-        var tail = at >= 0 ? s.slice(at + 1) : '';
-        return el('li', null, el('b', { text: action }), el('span', { class: 'cost', text: tail }));
-      }))
-    ));
+    if (isLive) {
+      dialog.appendChild(el('section', { class: 'detail-section' },
+        el('h3', { text: 'Farm plan' }),
+        el('p', { text: 'No farm plan: this token already trades, so there is no launch left to farm. The panel above exists only to calibrate the model against what the market actually pays.' })
+      ));
+    } else {
+      dialog.appendChild(el('section', { class: 'detail-section' },
+        el('h3', { text: 'Farm plan' }),
+        el('ol', { class: 'steps' }, steps.map(function (s) {
+          var at = s.indexOf(' Cost: ');
+          var action = at >= 0 ? s.slice(0, at) : s;
+          var tail = at >= 0 ? s.slice(at + 1) : '';
+          return el('li', null, el('b', { text: action }), el('span', { class: 'cost', text: tail }));
+        }))
+      ));
+    }
     if (typeof dialog.showModal === 'function') {
       if (!dialog.open) dialog.showModal();
     } else {

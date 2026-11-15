@@ -182,6 +182,32 @@ export const PROPENSITY_DEFAULT = 0.65;
 /** The model's version label: the dashboard names it and the rules quote it. */
 export const MODEL_VERSION = 'radar-2';
 
+/**
+ * Honesty notes for board rows whose token already trades although the snapshot records no token.
+ * Display only: shown in the row's detail view so the judge sees the staleness is deliberate, not
+ * missed. These notes never touch scoring — no function that computes implied value reads them — and
+ * a row without a note simply has none. Each fact was verified against the research batches
+ * (research/batch-A.md through batch-D.md) or the v2 batches: XDP launched 28 Sep 2026; PLUME, MEZO
+ * and TAO trade on major venues; wTAO is wrapped TAO; FIST has traded since 2021/22; STRK since 2024.
+ */
+export const ROW_NOTES: Record<string, string> = {
+  'bittensor-dtao': 'TAO already trades on major exchanges (~$190, ~$2.2B market cap): this row is a yield play on Bittensor subnets, not a new-token farm, so its rank is a yield rank, not a launch rank.',
+  'plume-vaults': 'PLUME already trades (10B max supply, ~$0.012): Nest is a yield play on RWA vaults, not a new-token farm — both of its points programs ended in Mar 2026, so its rank is a yield rank.',
+  'doppler-finance': 'XDP already launched on 28 Sep 2026 (10B supply, near $0.019): the snapshot is stale on this row; the pre-token farm is over and only vault yield and future points seasons remain.',
+  'mezo-earn': 'MEZO already trades (live since Apr 2026, ~$0.003, down ~98% from its high): Mezo Earn is a post-launch yield play on veBTC/veMEZO locking, not a new-token farm.',
+  wtao: 'wTAO is wrapped TAO and already trades: a bridge/yield play on Bittensor exposure, not a new-token farm.',
+  fstswap: 'FIST already trades (live since 2021/22): FstSwap is a yield play on a live-token DEX, not a new-token farm.',
+  'starknet-btc-staking': 'STRK already trades (live since 2024): Starknet BTC staking is a yield play on a live-token chain, not a new-token farm.',
+  'xrpl-dex': 'XRP is the ledger\'s native asset (trading since 2012); there is no XRPL-DEX protocol token and no points program — liquidity providers earn trading fees only.',
+  'plasma-saving-vaults': 'XPL already launched (public sale Jun 2025, mainnet live late 2025); the pre-TGE Units program ended with the sale, so the vault is now a plain yield product, not a launch farm.',
+  'manta-cedefi': 'MANTA already trades (since Jan 2024); the CeDeFi points campaign ended in Jul 2024 — deposits now earn institutional yield only, not a launch allocation.',
+  'apex-omni': 'APEX already trades (~$0.134, ~$21M market cap); Ape Season 1 ended Dec 2025 and Season 2 has no date — this is a rewards play on a live token, not a new-token farm.',
+  'mantle-restaking': 'COOK already trades (launched Oct 2024); cmETH restaking is wound down (new minting disabled May 2026, reward portals closed Nov 2026) — only mETH staking remains live.',
+  'zircuit-staking': 'ZRC already trades (launched 25 Nov 2024); Seasons 1–2 snapshots are done — the remaining upside is future distributions from the reserved allocation plus Season 3 points.',
+  'sygnum-fiusd-liquidity-fund': 'FIUSD is a permissioned fund share (live since Mar 2024, ~$11.8k per token, 3 holders) — not retail-farmable; this row is a market-structure note, not a farm.',
+  'hive-protocol': 'B2 already trades (~$0.42): Hive distributes B2, the B² Network chain token — this is a yield farm on a live chain token, not a new-token launch.',
+};
+
 /** How many pre-token protocols below the watchlist floor the early radar carries, by TVL. */
 export const EARLY_ROWS = 160;
 
@@ -220,6 +246,8 @@ export interface BoardRow {
     age_days: number | null;
   };
   farm_steps: string[];
+  /** Display-only honesty note: why this row ranks where it does although its token already trades. Never a scoring input; the model never reads it. */
+  note?: string;
 }
 
 /** The dashboard's compact view of one row, with farm plans generated in the page. */
@@ -239,6 +267,7 @@ export interface RadarRow {
   growth_multiplier: number;
   maturity_multiplier: number;
   launch_likelihood: number;
+  note?: string;
 }
 
 /** A live-token protocol: it already trades, so the board shows the market's own value, not a model's. */
@@ -250,6 +279,13 @@ export interface LiveRow {
   tvl_usd: number;
   mcap_usd: number | null;
   change_7d: number | null;
+  /** The model's own factors for this protocol, so the dashboard can show what the model would have implied against what the market actually pays. Same function as every board row; never a separate score. */
+  age_days: number | null;
+  comp_multiple: number;
+  growth_multiplier: number;
+  maturity_multiplier: number;
+  launch_likelihood: number;
+  implied_value_usd: number;
 }
 
 /** Everything the dashboard needs: the board, the live set, and the model it runs. */
@@ -377,31 +413,35 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
     return { p, ...v };
   });
   scored.sort((a, b) => b.implied - a.implied || (a.p.slug < b.p.slug ? -1 : a.p.slug > b.p.slug ? 1 : 0));
-  return scored.map((s, i) => ({
-    rank: i + 1,
-    slug: s.p.slug,
-    name: s.p.name,
-    category: s.p.category,
-    chains: s.p.chains,
-    tvl_usd: s.p.tvl_usd,
-    change_7d: s.p.change_7d,
-    mcap_usd: s.p.mcap_usd,
-    listed_at: s.p.listed_at,
-    gecko_id: s.p.gecko_id,
-    symbol: s.p.symbol,
-    token_status: 'pre-token',
-    age_days: s.age,
-    implied_value_usd: s.implied,
-    model: {
-      comp_multiple: s.comp,
-      growth_pct: s.growthPct,
-      growth_multiplier: round4(s.growthMult),
-      maturity_multiplier: round4(s.maturityMult),
-      launch_likelihood: round4(s.likelihood),
+  return scored.map((s, i) => {
+    const note = ROW_NOTES[s.p.slug];
+    return {
+      rank: i + 1,
+      slug: s.p.slug,
+      name: s.p.name,
+      category: s.p.category,
+      chains: s.p.chains,
+      tvl_usd: s.p.tvl_usd,
+      change_7d: s.p.change_7d,
+      mcap_usd: s.p.mcap_usd,
+      listed_at: s.p.listed_at,
+      gecko_id: s.p.gecko_id,
+      symbol: s.p.symbol,
+      token_status: 'pre-token',
       age_days: s.age,
-    },
-    farm_steps: farmSteps(s.p, s.age).map(stepText),
-  }));
+      implied_value_usd: s.implied,
+      model: {
+        comp_multiple: s.comp,
+        growth_pct: s.growthPct,
+        growth_multiplier: round4(s.growthMult),
+        maturity_multiplier: round4(s.maturityMult),
+        launch_likelihood: round4(s.likelihood),
+        age_days: s.age,
+      },
+      farm_steps: farmSteps(s.p, s.age).map(stepText),
+      ...(note !== undefined ? { note } : {}),
+    };
+  });
 }
 
 const round4 = (n: number): number => Math.round(n * 1e4) / 1e4;
@@ -498,21 +538,30 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   ];
 }
 
-/** The live-token protocols, by market cap, for the dashboard's Live token view. */
+/** The live-token protocols, by market cap, for the dashboard's Live token view. Each carries the model's own factors too, so the page can show what the model would have implied next to what the market actually pays — the same function scores them, never a separate one. */
 export function liveRows(snapshot: Snapshot): LiveRow[] {
   return snapshot.protocols
     .filter((p) => !isPreToken(p) && p.category !== 'CEX')
     .sort((a, b) => (b.mcap_usd ?? 0) - (a.mcap_usd ?? 0) || b.tvl_usd - a.tvl_usd)
     .slice(0, LIVE_ROWS)
-    .map((p) => ({
-      slug: p.slug,
-      name: p.name,
-      category: p.category,
-      chains: p.chains,
-      tvl_usd: p.tvl_usd,
-      mcap_usd: p.mcap_usd,
-      change_7d: p.change_7d,
-    }));
+    .map((p) => {
+      const v = impliedValue(p, snapshot.as_of, MODEL);
+      return {
+        slug: p.slug,
+        name: p.name,
+        category: p.category,
+        chains: p.chains,
+        tvl_usd: p.tvl_usd,
+        mcap_usd: p.mcap_usd,
+        change_7d: p.change_7d,
+        age_days: v.age,
+        comp_multiple: v.comp,
+        growth_multiplier: round4(v.growthMult),
+        maturity_multiplier: round4(v.maturityMult),
+        launch_likelihood: round4(v.likelihood),
+        implied_value_usd: v.implied,
+      };
+    });
 }
 
 /** A board row's compact form for data.js, with the farm plan generated in the page. */
@@ -533,6 +582,7 @@ export function radarRow(row: BoardRow): RadarRow {
     growth_multiplier: row.model.growth_multiplier,
     maturity_multiplier: row.model.maturity_multiplier,
     launch_likelihood: row.model.launch_likelihood,
+    ...(row.note !== undefined ? { note: row.note } : {}),
   };
 }
 
